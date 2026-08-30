@@ -1,3 +1,5 @@
+"""Single-A800 QLoRA CoT-SFT entry point."""
+
 from __future__ import annotations
 
 import argparse
@@ -18,8 +20,8 @@ from peft import TaskType, prepare_model_for_kbit_training
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
 from trl import SFTConfig, SFTTrainer
 
-from align_sql.training.config import SftRunConfig
-from align_sql.training.sft_data import SplitAudit, prepare_split
+from align_sql.training.sft.config import SftRunConfig
+from align_sql.training.sft.data import SplitAudit, prepare_split
 
 
 def _parse_args() -> argparse.Namespace:

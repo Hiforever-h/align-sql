@@ -1,3 +1,5 @@
+"""Configuration schema for QLoRA supervised fine-tuning."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace

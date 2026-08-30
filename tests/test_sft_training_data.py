@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from align_sql.training.sft_data import prepare_split
+from align_sql.training.sft.data import prepare_split
 
 
 class FakeChatTokenizer:
@@ -76,4 +76,3 @@ def test_prepare_split_detects_tokenizer_length_drift(tmp_path: Path) -> None:
             max_length=8,
             expected_dropped=0,
         )
-

@@ -1,3 +1,5 @@
+"""Dataset validation and prompt/completion conversion for SFT."""
+
 from __future__ import annotations
 
 import json

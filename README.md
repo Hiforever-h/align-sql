@@ -9,6 +9,14 @@ AlignSQL is a compact Text-to-SQL post-training project built around one path:
 
 The local macOS environment is intended for data preparation, tests, and configuration work. CUDA-only packages and the full 7B training runs belong in a separate Linux/A800 environment.
 
+Training implementations are separated by post-training stage:
+
+```text
+src/align_sql/training/
+├── sft/                 # QLoRA CoT-SFT implementation and operating guide
+└── dpo/                 # DPO implementation (added in stage 4)
+```
+
 ## Local environment
 
 ```bash
@@ -16,7 +24,6 @@ conda env create -f environment.yml
 conda activate align-sql
 python -m pip install --editable .
 python -m pip check
-wandb login
 pytest
 ```
 
@@ -62,6 +69,8 @@ The full configuration is in `configs/data_sft.yaml`; compact reports are commit
 
 ## Run QLoRA CoT-SFT on one A800
 
+The complete stage-2 operating guide is in [`src/align_sql/training/sft/README.md`](src/align_sql/training/sft/README.md).
+
 Use a Linux environment with Python 3.11 and a CUDA-enabled PyTorch build. Keep the PyTorch build matched to the CUDA driver on the training host, then install the remaining pinned stack:
 
 ```bash
@@ -69,6 +78,7 @@ conda activate align-sql
 python -m pip install -r requirements-a800.txt
 python -m pip install --editable .
 python -m pip check
+wandb login
 ```
 
 Put the Hugging Face cache on the AutoDL data disk and download the 7B snapshot before training:

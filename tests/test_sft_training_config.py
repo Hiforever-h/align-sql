@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from align_sql.training.config import SftRunConfig
+from align_sql.training.sft.config import SftRunConfig
 
 
 def test_stage2_config_has_expected_single_gpu_batch() -> None:
