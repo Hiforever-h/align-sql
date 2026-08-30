@@ -1,0 +1,21 @@
+# Linux/CUDA dependencies for the single-A800 QLoRA training machine.
+# Install/keep the CUDA-enabled PyTorch build supplied for the host driver.
+torch>=2.5,<2.14
+transformers==5.16.1
+datasets==5.0.1
+accelerate==1.14.0
+peft==0.20.0
+trl==1.12.0
+bitsandbytes==0.50.2
+wandb==0.29.0
+sqlglot==30.17.0
+socksio==1.0.0
+PyYAML==6.0.3
+pydantic==2.13.5
+tqdm==4.70.0
+tensorboard==2.21.0
+pytest==9.1.1
+pytest-timeout==2.4.0
+ruff==0.16.5
+func-timeout==4.3.5
+ijson==3.5.1

@@ -1,0 +1,64 @@
+model:
+  name_or_path: Qwen/Qwen2.5-Coder-7B-Instruct
+  trust_remote_code: false
+  attn_implementation: sdpa
+
+quantization:
+  load_in_4bit: true
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: bfloat16
+
+lora:
+  r: 64
+  alpha: 128
+  dropout: 0.05
+  bias: none
+  target_modules: all-linear
+  use_rslora: false
+
+data:
+  train_file: data/processed/sft_train.jsonl
+  validation_file: data/processed/sft_validation.jsonl
+  max_length: 3072
+  overlength_policy: drop
+  expected_dropped_train: 2
+  expected_dropped_validation: 0
+
+training:
+  output_dir: outputs/sft-qwen2.5-coder-7b-qlora
+  run_name: qwen2.5-coder-7b-qlora-cot-sft
+  num_train_epochs: 2.0
+  max_steps: -1
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 2
+  gradient_accumulation_steps: 8
+  learning_rate: 0.0001
+  warmup_steps: 20
+  lr_scheduler_type: cosine
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  optim: paged_adamw_8bit
+  bf16: true
+  tf32: true
+  gradient_checkpointing: true
+  gradient_checkpointing_use_reentrant: false
+  packing: false
+  completion_only_loss: true
+  pad_to_multiple_of: 8
+  logging_steps: 10
+  eval_steps: 100
+  save_steps: 100
+  save_total_limit: 2
+  dataset_num_proc: 4
+  dataloader_num_workers: 4
+  seed: 42
+  report_to:
+    - tensorboard
+    - wandb
+
+monitoring:
+  wandb_project: align-sql
+  wandb_mode: online
+  wandb_log_model: false
+  wandb_watch: false

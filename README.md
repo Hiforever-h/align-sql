@@ -16,6 +16,7 @@ conda env create -f environment.yml
 conda activate align-sql
 python -m pip install --editable .
 python -m pip check
+wandb login
 pytest
 ```
 
@@ -59,6 +60,50 @@ The preparation pipeline streams the 714 MB source file, extracts SQL from each 
 
 The full configuration is in `configs/data_sft.yaml`; compact reports are committed under `data/reports/` while generated JSONL files remain local under `data/processed/`.
 
+## Run QLoRA CoT-SFT on one A800
+
+Use a Linux environment with Python 3.11 and a CUDA-enabled PyTorch build. Keep the PyTorch build matched to the CUDA driver on the training host, then install the remaining pinned stack:
+
+```bash
+conda activate align-sql
+python -m pip install -r requirements-a800.txt
+python -m pip install --editable .
+python -m pip check
+```
+
+Put the Hugging Face cache on the AutoDL data disk and download the 7B snapshot before training:
+
+```bash
+export HF_HOME=/root/autodl-tmp/huggingface
+export HF_HUB_CACHE=/root/autodl-tmp/huggingface/hub
+
+scripts/download_model.sh Qwen/Qwen2.5-Coder-7B-Instruct
+```
+
+The same exports must be present in the shell that launches training. First validate the tokenizer and processed dataset without loading model weights:
+
+```bash
+scripts/train_sft.sh --validate-only
+```
+
+An optional five-step CUDA smoke run uses a separate output directory:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 scripts/train_sft.sh \
+  --max-steps 5 \
+  --output-dir outputs/sft-smoke
+```
+
+Start the full two-epoch run with:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 scripts/train_sft.sh
+```
+
+The default configuration is `configs/sft_qlora.yaml`. It uses 4-bit NF4 QLoRA, bf16 compute, double quantization, LoRA rank 64 on all linear layers, completion-only loss, gradient checkpointing, and a 3,072-token limit. It trains on 4,809 examples after explicitly dropping the two known overlength rows.
+
+Training metrics are sent to the `align-sql` W&B project and retained in TensorBoard as an offline fallback. Override the W&B destination without editing tracked configuration by exporting `WANDB_PROJECT` or `WANDB_ENTITY`; use `WANDB_MODE=offline` when the training host has no stable network. Model artifact upload and gradient histogram watching are disabled by default. Checkpoints and local monitoring files are written under `outputs/sft-qwen2.5-coder-7b-qlora/`; the final adapter is written to its `final_adapter/` subdirectory.
+
 ## Status
 
-Phases 0 and 1 (repository setup and SFT data preparation) are complete. Training, preference mining, and BIRD evaluation are implemented in later phases.
+Phases 0 and 1 are complete. The stage-2 QLoRA-SFT implementation and A800 launch configuration are ready; the actual A800 training run is pending. Preference mining, DPO, and BIRD evaluation are implemented in later phases.
