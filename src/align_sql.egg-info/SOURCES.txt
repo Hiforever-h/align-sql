@@ -1,0 +1,13 @@
+README.md
+pyproject.toml
+src/align_sql/__init__.py
+src/align_sql.egg-info/PKG-INFO
+src/align_sql.egg-info/SOURCES.txt
+src/align_sql.egg-info/dependency_links.txt
+src/align_sql.egg-info/top_level.txt
+src/align_sql/data/__init__.py
+src/align_sql/evaluation/__init__.py
+src/align_sql/generation/__init__.py
+src/align_sql/training/__init__.py
+src/align_sql/verification/__init__.py
+tests/test_environment.py

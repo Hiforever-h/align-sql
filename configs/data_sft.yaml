@@ -1,0 +1,20 @@
+paths:
+  synthetic: data/raw/syn_cot_data.json
+  train: data/raw/train_bird.json
+  raw_report: data/reports/raw_validation.json
+  sft_train: data/processed/sft_train.jsonl
+  sft_validation: data/processed/sft_validation.jsonl
+  sft_report: data/reports/sft_data_report.json
+
+selection:
+  method: median_gold_matching_response_length
+  validation_ratio: 0.02
+  seed: 42
+
+tokenizer:
+  name_or_path: Qwen/Qwen2.5-Coder-7B-Instruct
+  cutoff_candidates:
+    - 2048
+    - 3072
+    - 4096
+  target_coverage: 0.98

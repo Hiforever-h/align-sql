@@ -1,0 +1,30 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+.idea/
+.vscode/
+
+# Raw/derived datasets and database files are local-only.
+data/raw/
+data/processed/
+
+# Model checkpoints, logs, and experiment artifacts.
+outputs/
+runs/
+wandb/
+*.safetensors
+*.bin
+*.pt
+*.pth
+
