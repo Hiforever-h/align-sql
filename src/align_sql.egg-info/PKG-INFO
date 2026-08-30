@@ -52,9 +52,8 @@ Observed source-data inventory:
 - `train_bird.json`: 9,428 training prompts and gold SQL queries.
 - 276 training questions have no released synthetic trajectory and will be excluded from the first SFT dataset.
 
-Generated datasets go under `data/processed/`; model outputs go under `outputs/`. Both locations are ignored by Git.
+Generated datasets go under `data/processed/` and are ignored by Git. On the A800 host, checkpoints, adapters, evaluation artifacts, and local monitoring files go under `/root/align-sql/outputs/`. This directory is inside the repository checkout but excluded by `.gitignore`.
 
 ## Status
 
 Phase 0 is the repository and local-environment setup. Data preparation, training, preference mining, and BIRD evaluation are implemented in later phases.
-

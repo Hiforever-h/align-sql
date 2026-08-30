@@ -54,7 +54,18 @@ Observed source-data inventory:
 - `train_bird.json`: 9,428 training prompts and gold SQL queries.
 - 276 training questions have no released synthetic trajectory and will be excluded from the first SFT dataset.
 
-Generated datasets go under `data/processed/`; model outputs go under `outputs/`. Both locations are ignored by Git.
+Generated datasets go under `data/processed/` and are ignored by Git. On the A800 host, checkpoints, adapters, evaluation artifacts, and local monitoring files go under `/root/align-sql/outputs/`. This directory is inside the repository checkout but excluded by `.gitignore`.
+
+## BIRD database paths on the A800 host
+
+The downloaded Train and Dev SQLite roots intentionally use different storage locations:
+
+| Split | Database root | Used by |
+| --- | --- | --- |
+| Train | `/root/autodl-tmp/bird/train/train_databases` | SFT validation execution and DPO preference mining |
+| Dev | `/root/align-sql/data/bird/dev_20240627/dev_databases` | Final BIRD Dev execution evaluation only |
+
+Do not use Dev databases for SFT training or DPO preference construction. The evaluation and future DPO commands receive the appropriate root explicitly through `--db-root` or their stage configuration.
 
 ## Prepare SFT data
 
@@ -101,7 +112,7 @@ An optional five-step CUDA smoke run uses a separate output directory:
 ```bash
 CUDA_VISIBLE_DEVICES=0 scripts/train_sft.sh \
   --max-steps 5 \
-  --output-dir outputs/sft-smoke
+  --output-dir /root/align-sql/outputs/sft-smoke
 ```
 
 Start the full two-epoch run with:
@@ -112,8 +123,66 @@ CUDA_VISIBLE_DEVICES=0 scripts/train_sft.sh
 
 The default configuration is `configs/sft_qlora.yaml`. It uses 4-bit NF4 QLoRA, bf16 compute, double quantization, LoRA rank 64 on all linear layers, completion-only loss, gradient checkpointing, and a 3,072-token limit. It trains on 4,809 examples after explicitly dropping the two known overlength rows.
 
-Training metrics are sent to the `align-sql` W&B project and retained in TensorBoard as an offline fallback. Override the W&B destination without editing tracked configuration by exporting `WANDB_PROJECT` or `WANDB_ENTITY`; use `WANDB_MODE=offline` when the training host has no stable network. Model artifact upload and gradient histogram watching are disabled by default. Checkpoints and local monitoring files are written under `outputs/sft-qwen2.5-coder-7b-qlora/`; the final adapter is written to its `final_adapter/` subdirectory.
+Training metrics are sent to the `align-sql` W&B project and retained in TensorBoard as an offline fallback. Override the W&B destination without editing tracked configuration by exporting `WANDB_PROJECT` or `WANDB_ENTITY`; use `WANDB_MODE=offline` when the training host has no stable network. Model artifact upload and gradient histogram watching are disabled by default. Checkpoints and local monitoring files are written under `/root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora/`; the final adapter is written to its `final_adapter/` subdirectory.
+
+## Evaluate Base and SFT
+
+The complete guide is in [`src/align_sql/evaluation/sft/README.md`](src/align_sql/evaluation/sft/README.md). `eval_base.sh` loads the 4-bit base model without PEFT; `eval_sft.sh` loads the same base model plus the final adapter. Do not pass an empty adapter path to emulate the Base run.
+
+Run matched five-example smoke evaluations:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 scripts/eval_base.sh \
+  --limit 5 \
+  --output-dir /root/align-sql/outputs/base-qwen2.5-coder-7b/eval/smoke
+```
+
+```bash
+CUDA_VISIBLE_DEVICES=0 scripts/eval_sft.sh \
+  --limit 5 \
+  --output-dir /root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora/eval/smoke
+```
+
+The default full commands evaluate the same 107 held-out SFT examples with identical decoding settings:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 scripts/eval_base.sh
+```
+
+```bash
+CUDA_VISIBLE_DEVICES=0 scripts/eval_sft.sh
+```
+
+Run execution evaluation on the 107 examples with the Train databases:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 scripts/eval_base.sh \
+  --db-root /root/autodl-tmp/bird/train/train_databases \
+  --output-dir /root/align-sql/outputs/base-qwen2.5-coder-7b/eval/sft_validation_execution
+```
+
+```bash
+CUDA_VISIBLE_DEVICES=0 scripts/eval_sft.sh \
+  --db-root /root/autodl-tmp/bird/train/train_databases \
+  --output-dir /root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora/eval/sft_validation_execution
+```
+
+Run the final BIRD Dev evaluation with the separate Dev database root. First record the Base baseline, then evaluate SFT:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 scripts/eval_base.sh \
+  --data data/raw/dev_bird_0627_10b.json \
+  --db-root /root/align-sql/data/bird/dev_20240627/dev_databases \
+  --output-dir /root/align-sql/outputs/base-qwen2.5-coder-7b/eval/bird_dev
+```
+
+```bash
+CUDA_VISIBLE_DEVICES=0 scripts/eval_sft.sh \
+  --data data/raw/dev_bird_0627_10b.json \
+  --db-root /root/align-sql/data/bird/dev_20240627/dev_databases \
+  --output-dir /root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora/eval/bird_dev
+```
 
 ## Status
 
-Phases 0 and 1 are complete. The stage-2 QLoRA-SFT implementation and A800 launch configuration are ready; the actual A800 training run is pending. Preference mining, DPO, and BIRD evaluation are implemented in later phases.
+Phases 0 and 1 are complete. The stage-2 QLoRA-SFT and independent generation/execution evaluation implementations are ready; the actual A800 training and evaluation runs are pending. Preference mining and DPO are implemented in later phases.

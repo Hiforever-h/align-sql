@@ -1,0 +1,25 @@
+model:
+  mode: adapter
+  base_model_name_or_path: Qwen/Qwen2.5-Coder-7B-Instruct
+  adapter_path: /root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora/final_adapter
+  attn_implementation: sdpa
+  trust_remote_code: false
+  load_in_4bit: true
+
+data:
+  path: data/processed/sft_validation.jsonl
+  max_input_length: 3072
+  limit: null
+
+generation:
+  batch_size: 4
+  max_new_tokens: 768
+  seed: 42
+
+execution:
+  db_root: null
+  timeout_seconds: 30.0
+  max_result_rows: 100000
+
+output:
+  dir: /root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora/eval/sft_validation

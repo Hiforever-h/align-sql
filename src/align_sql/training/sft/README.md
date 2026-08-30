@@ -163,7 +163,7 @@ planned_optimizer_steps: 602
 ```bash
 CUDA_VISIBLE_DEVICES=0 scripts/train_sft.sh \
   --max-steps 5 \
-  --output-dir outputs/sft-smoke
+  --output-dir /root/align-sql/outputs/sft-smoke
 ```
 
 确认以下项目后再正式训练：
@@ -171,7 +171,7 @@ CUDA_VISIBLE_DEVICES=0 scripts/train_sft.sh \
 - 没有 CUDA OOM。
 - loss 和 grad norm 为有限数值，无 NaN/Inf。
 - W&B 中能够看到训练 run。
-- `outputs/sft-smoke/final_adapter/` 可以生成。
+- `/root/align-sql/outputs/sft-smoke/final_adapter/` 可以生成。
 
 ## 7. 正式训练
 
@@ -189,7 +189,7 @@ CUDA_VISIBLE_DEVICES=0 python -m align_sql.training.sft.train \
 默认输出：
 
 ```text
-outputs/sft-qwen2.5-coder-7b-qlora/
+/root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora/
 ├── checkpoint-500/       # 结束时通常保留的两个最近 checkpoint
 ├── checkpoint-600/
 ├── final_adapter/        # 最终 LoRA adapter + tokenizer
@@ -208,7 +208,7 @@ outputs/sft-qwen2.5-coder-7b-qlora/
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 scripts/train_sft.sh \
-  --resume-from-checkpoint outputs/sft-qwen2.5-coder-7b-qlora/checkpoint-500
+  --resume-from-checkpoint /root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora/checkpoint-500
 ```
 
 如果希望 W&B 继续到原 run，可在恢复前设置原来的 W&B run ID：
@@ -226,9 +226,36 @@ export WANDB_RESUME=must
 
 ```bash
 scripts/train_sft.sh --max-steps 5
-scripts/train_sft.sh --output-dir outputs/another-sft-run
+scripts/train_sft.sh --output-dir /root/align-sql/outputs/another-sft-run
 scripts/train_sft.sh --model-name-or-path /path/to/local/model-snapshot
 ```
 
 其他超参数统一修改 `configs/sft_qlora.yaml`，以保证 run manifest 能完整记录实际配置。
 
+## 10. Base/SFT 生成评测
+
+训练中的 validation 只计算 loss。独立的 SQL 生成与执行评测说明位于 `src/align_sql/evaluation/sft/README.md`。Base 使用独立入口，不要把 SFT adapter 参数传空：
+
+```bash
+CUDA_VISIBLE_DEVICES=0 scripts/eval_base.sh \
+  --limit 5 \
+  --output-dir /root/align-sql/outputs/base-qwen2.5-coder-7b/eval/smoke
+```
+
+然后运行五条 SFT 实际模型输出：
+
+```bash
+CUDA_VISIBLE_DEVICES=0 scripts/eval_sft.sh \
+  --limit 5 \
+  --output-dir /root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora/eval/smoke
+```
+
+最后分别运行完整 107 条 SFT validation：
+
+```bash
+CUDA_VISIBLE_DEVICES=0 scripts/eval_base.sh
+```
+
+```bash
+CUDA_VISIBLE_DEVICES=0 scripts/eval_sft.sh
+```

@@ -48,7 +48,7 @@ SFT 是项目主体，DPO 只负责在 SFT checkpoint 上提高正确轨迹的�
    scripts/              # 可复现的命令入口
    src/align_sql/        # Python 包
    tests/                # 单元测试
-   outputs/              # checkpoint 和训练日志，不进入 Git
+   /root/align-sql/outputs/  # A800 checkpoint、评测结果和训练日志
    ```
 
 2. 将项目根目录中的数据整理到 `data/raw/`：
@@ -146,6 +146,7 @@ SFT 是项目主体，DPO 只负责在 SFT checkpoint 上提高正确轨迹的�
 5. 初始训练策略以稳定为主：2 epochs、`1e-4` 学习率、固定随机种子，并保存 adapter、tokenizer、配置和日志。（配置已完成）
 6. 同时接入 W&B 与 TensorBoard；W&B 默认只上传训练指标，不上传模型 artifact 或梯度直方图。（已完成）
 7. 先用 5 steps 完成 A800 smoke run，再启动完整训练。（待在 A800 执行）
+8. 使用同一评测器分别运行 4-bit Base 与 SFT adapter 的 greedy generation、SQL 提取/解析和可选 SQLite execution evaluation；两者保持相同数据与解码参数。（代码已完成，A800 评测待执行）
 
 ### 验收标准
 
@@ -181,6 +182,8 @@ reasoning + correct SQL  >  reasoning + wrong SQL
 - 阶段 0、阶段 1 和 SFT 训练不需要这 33.4GB 数据库。
 - 阶段 3 的 execution verifier 和最终执行评测需要数据库。
 - 候选生成适合放在 A800 上；SQLite 执行验证主要使用 CPU，也可以与生成步骤解耦。
+- Train database root：`/root/autodl-tmp/bird/train/train_databases`，用于 SFT validation execution 和 DPO preference mining。
+- Dev database root：`/root/align-sql/data/bird/dev_20240627/dev_databases`，仅用于最终 BIRD Dev execution evaluation。
 
 ### 验收标准
 

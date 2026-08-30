@@ -25,13 +25,13 @@ def test_stage2_config_overrides_do_not_mutate_source() -> None:
     config = SftRunConfig.from_yaml(Path("configs/sft_qlora.yaml"))
     updated = config.with_overrides(
         model_name_or_path="/models/qwen",
-        output_dir="outputs/smoke",
+        output_dir="/root/align-sql/outputs/smoke",
         max_steps=5,
     )
 
     assert config.training.max_steps == -1
     assert updated.model.name_or_path == "/models/qwen"
-    assert updated.training.output_dir == Path("outputs/smoke")
+    assert updated.training.output_dir == Path("/root/align-sql/outputs/smoke")
     assert updated.training.max_steps == 5
 
 
