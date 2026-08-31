@@ -18,6 +18,7 @@ from typing import Any
 
 import torch
 from peft import PeftConfig, PeftModel
+from tqdm.auto import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
 
 from align_sql.evaluation.sft.execution import resolve_database
@@ -345,102 +346,117 @@ def _generate_candidates(
     generated_questions = len(existing)
     num_candidates = config.sampling.num_candidates
     batches = list(_batch(selected, config.sampling.prompt_batch_size))
-    for batch_index, batch_examples in enumerate(batches):
-        missing_examples = [
-            example for example in batch_examples if example.question_id not in existing
-        ]
-        if not missing_examples:
-            continue
-        batch_seed = config.sampling.seed + batch_index
-        set_seed(batch_seed)
-        rendered_prompts = [
-            tokenizer.apply_chat_template(
-                list(example.prompt),
-                tokenize=False,
-                add_generation_prompt=True,
+    progress = tqdm(
+        total=len(selected),
+        initial=len(existing),
+        desc=f"Sampling K={num_candidates}",
+        unit="question",
+        dynamic_ncols=True,
+        smoothing=0.1,
+    )
+    try:
+        for batch_index, batch_examples in enumerate(batches):
+            missing_examples = [
+                example
+                for example in batch_examples
+                if example.question_id not in existing
+            ]
+            if not missing_examples:
+                continue
+            batch_seed = config.sampling.seed + batch_index
+            set_seed(batch_seed)
+            rendered_prompts = [
+                tokenizer.apply_chat_template(
+                    list(example.prompt),
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+                for example in missing_examples
+            ]
+            inputs = tokenizer(
+                rendered_prompts,
+                add_special_tokens=False,
+                padding=True,
+                truncation=False,
+                return_tensors="pt",
             )
-            for example in missing_examples
-        ]
-        inputs = tokenizer(
-            rendered_prompts,
-            add_special_tokens=False,
-            padding=True,
-            truncation=False,
-            return_tensors="pt",
-        )
-        input_lengths = [int(value) for value in inputs["attention_mask"].sum(dim=1)]
-        overlength = [
-            (example.question_id, length)
-            for example, length in zip(missing_examples, input_lengths, strict=True)
-            if length > config.data.max_input_length
-        ]
-        if overlength:
-            raise ValueError(
-                f"Mining prompts exceed max_input_length={config.data.max_input_length}: "
-                f"{overlength}"
-            )
+            input_lengths = [int(value) for value in inputs["attention_mask"].sum(dim=1)]
+            overlength = [
+                (example.question_id, length)
+                for example, length in zip(missing_examples, input_lengths, strict=True)
+                if length > config.data.max_input_length
+            ]
+            if overlength:
+                raise ValueError(
+                    f"Mining prompts exceed max_input_length="
+                    f"{config.data.max_input_length}: {overlength}"
+                )
 
-        inputs = inputs.to(model.device)
-        input_width = int(inputs["input_ids"].shape[1])
-        batch_started = time.monotonic()
-        with torch.inference_mode():
-            generated = model.generate(
-                **inputs,
-                do_sample=True,
-                temperature=config.sampling.temperature,
-                top_p=config.sampling.top_p,
-                num_return_sequences=num_candidates,
-                max_new_tokens=config.sampling.max_new_tokens,
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-                use_cache=True,
-            )
-        torch.cuda.synchronize()
-        batch_elapsed = time.monotonic() - batch_started
-        generated_ids = generated[:, input_width:]
-        generations = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
-
-        for example_index, example in enumerate(missing_examples):
-            candidates: list[dict[str, Any]] = []
-            start = example_index * num_candidates
-            for candidate_index in range(num_candidates):
-                flat_index = start + candidate_index
-                token_ids = [int(value) for value in generated_ids[flat_index].tolist()]
-                generated_tokens, hit_cap = _completion_length_and_cap(
-                    token_ids,
-                    eos_token_id=tokenizer.eos_token_id,
-                    pad_token_id=tokenizer.pad_token_id,
+            inputs = inputs.to(model.device)
+            input_width = int(inputs["input_ids"].shape[1])
+            batch_started = time.monotonic()
+            with torch.inference_mode():
+                generated = model.generate(
+                    **inputs,
+                    do_sample=True,
+                    temperature=config.sampling.temperature,
+                    top_p=config.sampling.top_p,
+                    num_return_sequences=num_candidates,
                     max_new_tokens=config.sampling.max_new_tokens,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                    use_cache=True,
                 )
-                candidates.append(
-                    {
-                        "candidate_index": candidate_index,
-                        "generation": generations[flat_index],
-                        "input_tokens": input_lengths[example_index],
-                        "generated_tokens": generated_tokens,
-                        "hit_max_new_tokens": hit_cap,
-                        "batch_seed": batch_seed,
-                        "generation_seconds": round(
-                            batch_elapsed / len(missing_examples), 6
-                        ),
-                    }
-                )
-            group = {
-                "source_index": example.source_index,
-                "question_id": example.question_id,
-                "db_id": example.db_id,
-                "prompt": list(example.prompt),
-                "gold_sql": example.gold_sql,
-                "candidates": candidates,
-            }
-            _append_jsonl(config.output.candidates_file, group)
-            existing[example.question_id] = group
-            generated_questions += 1
-        print(
-            f"Generated batch {batch_index + 1}/{len(batches)}: "
-            f"{generated_questions}/{len(selected)} questions",
-            flush=True,
-        )
+            torch.cuda.synchronize()
+            batch_elapsed = time.monotonic() - batch_started
+            generated_ids = generated[:, input_width:]
+            generations = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
+
+            for example_index, example in enumerate(missing_examples):
+                candidates: list[dict[str, Any]] = []
+                start = example_index * num_candidates
+                for candidate_index in range(num_candidates):
+                    flat_index = start + candidate_index
+                    token_ids = [
+                        int(value) for value in generated_ids[flat_index].tolist()
+                    ]
+                    generated_tokens, hit_cap = _completion_length_and_cap(
+                        token_ids,
+                        eos_token_id=tokenizer.eos_token_id,
+                        pad_token_id=tokenizer.pad_token_id,
+                        max_new_tokens=config.sampling.max_new_tokens,
+                    )
+                    candidates.append(
+                        {
+                            "candidate_index": candidate_index,
+                            "generation": generations[flat_index],
+                            "input_tokens": input_lengths[example_index],
+                            "generated_tokens": generated_tokens,
+                            "hit_max_new_tokens": hit_cap,
+                            "batch_seed": batch_seed,
+                            "generation_seconds": round(
+                                batch_elapsed / len(missing_examples), 6
+                            ),
+                        }
+                    )
+                group = {
+                    "source_index": example.source_index,
+                    "question_id": example.question_id,
+                    "db_id": example.db_id,
+                    "prompt": list(example.prompt),
+                    "gold_sql": example.gold_sql,
+                    "candidates": candidates,
+                }
+                _append_jsonl(config.output.candidates_file, group)
+                existing[example.question_id] = group
+                generated_questions += 1
+            progress.update(len(missing_examples))
+            progress.set_postfix(
+                batch=f"{batch_index + 1}/{len(batches)}",
+                candidates=generated_questions * num_candidates,
+            )
+    finally:
+        progress.close()
 
     elapsed = time.monotonic() - started
     manifest.update(

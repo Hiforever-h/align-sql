@@ -200,7 +200,7 @@ SFT 是项目主体，DPO 只负责在 SFT checkpoint 上提高正确轨迹的�
 - [x] 使用相同 verifier 时，SFT raw execution accuracy 明显高于 Base。
 - [ ] BIRD Dev 尚未评测，不把 Train validation 结果表述为最终 benchmark 分数。
 
-## 五、阶段 3：执行引导的 DPO 偏好数据（代码已完成，A800 mining 待执行）
+## 五、阶段 3：执行引导的 DPO 偏好数据（pilot 已完成，full mining 待执行）
 
 ### 目标
 
@@ -214,14 +214,14 @@ reasoning + correct SQL  >  reasoning + wrong SQL
 
 ### 实现内容
 
-1. 从实际参与 SFT 的 4,809 条 train prompts 中按数据库覆盖进行确定性抽样；默认选择 2,000 条，107 条 validation 不参与 mining。（代码已完成）
-2. 使用 SFT adapter 对每个 prompt 进行 `K=4` sampling：temperature 0.7、top-p 0.95、max new tokens 768；候选生成支持独立阶段与断点续跑。（代码已完成）
+1. 从实际参与 SFT 的 4,809 条 train prompts 中按数据库覆盖确定性选择 2,000 条，107 条 validation 不参与 mining。（代码已完成）
+2. 使用 SFT adapter 对每个 prompt 进行 `K=4` sampling：prompt batch size 8、temperature 0.9、top-p 0.95、max new tokens 768；候选生成支持带 ETA 的 question 级进度条、独立阶段与断点续跑。（代码已完成）
 3. 从每条完整输出中提取最终 SQL，并记录 parse、截断、重复和 token 长度。（代码已完成）
 4. 不运行独立 gold 预验证 pass；验证某道题时只执行一次 gold，并将结果复用于该题全部 candidate。gold 状态非 `ok` 时跳过该题 candidate execution 并报告原因。（代码已完成）
 5. 优先从同一道题中选择 execution-correct trajectory 作为 `chosen`、可执行但结果错误的 hard negative 作为 `rejected`；默认不使用无 SQL 或 SQL error 这类简单负例。（代码已完成）
-6. 每题最多保留一个长度尽量接近的 pair，去除重复/截断候选，并按数据库感知的 95/5 比例输出 DPO train/validation JSONL。（代码已完成）
+6. 每题最多保留一个 pair；execution-correct chosen 中优先选择 canonical SQL 与 gold 完全一致的候选，再在同一优先级内最小化 chosen/rejected token 长度差。去除重复/截断候选，并按数据库感知的 95/5 比例输出 DPO train/validation JSONL。（代码已完成）
 7. 保存 raw/verified candidates、pair 数据、mining report 和包含数据/选择/adapter 指纹的 run manifest。（代码已完成）
-8. 先运行 200 prompts pilot，根据实际 pair yield 和吞吐决定是否维持默认 2,000 条或扩大到全部 4,809 条。（待 A800 执行）
+8. 已完成 temperature 0.7 的 `200 prompts × K=4` pilot：使用 prompt batch size 8，产出 46 个有效 pair，`pair_yield=23%`，A800 80GB 峰值显存约 59GB。按修正后的策略只读重选后 pair 数不变，canonical-exact chosen 从 16 增至 25，平均 pair token 长度差约为 40.2。为控制时间，正式任务使用 2,000 条、temperature 0.9 和 `8 × 4` 配置；按 pilot 吞吐预计 generation + build 约 4.5 小时，实际时间受输出长度影响。（pilot 已完成）
 
 ### BIRD 33.4GB 数据库的使用边界
 
@@ -285,5 +285,5 @@ reasoning + correct SQL  >  reasoning + wrong SQL
 - [x] 阶段 0：环境与仓库初始化。
 - [x] 阶段 1：构建 CoT-SFT 数据。
 - [x] 阶段 2：QLoRA CoT-SFT（单卡 A800 训练及 107 条 Train validation Base/SFT 对比已完成；BIRD Dev 未评测）。
-- [ ] 阶段 3：执行引导的 DPO 偏好数据（代码、配置和本地校验已完成；A800 pilot/full mining 待执行）。
+- [ ] 阶段 3：执行引导的 DPO 偏好数据（代码、配置、本地校验和 A800 pilot 已完成；2,000 条正式 mining 待执行）。
 - [ ] 阶段 4：QLoRA-DPO 与最小验收。

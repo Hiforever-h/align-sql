@@ -115,7 +115,7 @@ def select_preference_pair(
     *,
     include_execution_error_rejected: bool,
 ) -> tuple[dict[str, Any] | None, str]:
-    """Choose one length-balanced correct-vs-hard-negative pair for a prompt."""
+    """Choose one exact-gold-preferring correct-vs-hard-negative pair."""
 
     gold_execution = verified_group.get("gold_execution", {})
     if gold_execution.get("status") != "ok":
@@ -158,11 +158,11 @@ def select_preference_pair(
             for rejected_candidate in rejected_pool
         ),
         key=lambda pair: (
+            not bool(pair[0]["canonical_match"]),
             abs(
                 int(pair[0]["generated_tokens"])
                 - int(pair[1]["generated_tokens"])
             ),
-            not bool(pair[0]["canonical_match"]),
             int(pair[0]["candidate_index"]),
             int(pair[1]["candidate_index"]),
         ),

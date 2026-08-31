@@ -44,7 +44,7 @@ def _raw_group() -> dict[str, object]:
             _candidate(0, "SELECT value FROM items WHERE id = 1", 50),
             _candidate(1, "SELECT value FROM items WHERE id = 2", 52),
             _candidate(2, "SELECT missing FROM items", 51),
-            _candidate(3, "SELECT value FROM items WHERE id = 2", 60),
+            _candidate(3, "SELECT items.value FROM items WHERE items.id = 1", 51),
         ],
     }
 
@@ -81,6 +81,7 @@ def test_verification_executes_gold_once_and_prefers_executable_negative(
     assert pair["metadata"]["negative_type"] == "execution_mismatch"
     assert pair["metadata"]["chosen_candidate_index"] == 0
     assert pair["metadata"]["rejected_candidate_index"] == 1
+    assert pair["metadata"]["chosen_canonical_match"]
     assert len(pair["prompt"]) == 1
 
 

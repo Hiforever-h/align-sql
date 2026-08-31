@@ -185,13 +185,13 @@ CUDA_VISIBLE_DEVICES=0 scripts/eval_sft.sh \
 
 ## Mine execution-guided DPO preferences
 
-The stage-3 guide is in [`src/align_sql/training/dpo/README.md`](src/align_sql/training/dpo/README.md). Validate the deterministic 2,000-prompt selection locally without CUDA or databases:
+The stage-3 guide is in [`src/align_sql/training/dpo/README.md`](src/align_sql/training/dpo/README.md). Validate the deterministic, database-aware 2,000-prompt selection locally without CUDA or databases:
 
 ```bash
 scripts/mine_dpo.sh --validate-only
 ```
 
-Run a separate 200-question A800 pilot before the default 2,000-question job:
+The completed 200-question pilot used `8 prompts × K=4` at temperature 0.7, produced 46 preference pairs (`23%` yield), and peaked at about 59GB on an A800 80GB. To shorten the project cycle, the default full job now selects 2,000 prompts, retains `8 × 4`, and uses temperature 0.9 for greater candidate diversity:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 scripts/mine_dpo.sh \
@@ -199,8 +199,14 @@ CUDA_VISIBLE_DEVICES=0 scripts/mine_dpo.sh \
   --output-dir /root/align-sql/outputs/dpo-mining-pilot
 ```
 
+Run the full job with:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 scripts/mine_dpo.sh
+```
+
 The default `K=4` pipeline samples full reasoning plus SQL from the SFT adapter, executes gold once per question inline, reuses that result for all candidates, and keeps execution-correct versus executable-wrong hard-negative pairs. It does not use the 107 held-out validation questions.
 
 ## Status
 
-Phases 0, 1, and 2 are complete. Stage-3 preference-mining code and configuration are ready; the A800 pilot and full mining run are pending. DPO training is implemented in stage 4.
+Phases 0, 1, and 2 are complete. Stage-3 preference-mining code, configuration, and A800 pilot are complete; the expedited 2,000-question mining run is pending. DPO training is implemented in stage 4.

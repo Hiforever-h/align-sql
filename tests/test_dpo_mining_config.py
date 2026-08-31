@@ -18,7 +18,8 @@ def test_default_dpo_mining_config() -> None:
     assert config.data.sample_size == 2000
     assert config.data.exclude_question_ids == (2809, 7769)
     assert config.sampling.num_candidates == 4
-    assert config.sampling.prompt_batch_size == 2
+    assert config.sampling.prompt_batch_size == 8
+    assert config.sampling.temperature == 0.9
     assert config.execution.db_root == Path(
         "/root/autodl-tmp/bird/train/train_databases"
     )

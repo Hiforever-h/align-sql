@@ -15,9 +15,9 @@ data:
 
 sampling:
   num_candidates: 4
-  prompt_batch_size: 2
+  prompt_batch_size: 8
   max_new_tokens: 768
-  temperature: 0.7
+  temperature: 0.9
   top_p: 0.95
   seed: 42
 

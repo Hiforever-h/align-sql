@@ -22,8 +22,8 @@ dpo/
 | Source questions | 4,809；排除 SFT 未训练的 question 2809、7769 |
 | Selected questions | database-aware deterministic 2,000 |
 | Candidates | `K=4` |
-| Sampling | temperature 0.7、top-p 0.95、seed 42 |
-| Prompt batch size | 2 prompts，即一次最多返回 8 条 sequence |
+| Sampling | temperature 0.9、top-p 0.95、seed 42 |
+| Prompt batch size | 8 prompts，即一次最多返回 32 条 sequence |
 | Max input/new tokens | 3,072 / 768 |
 | Train DB | `/root/autodl-tmp/bird/train/train_databases` |
 | Pair validation ratio | 5% |
@@ -50,7 +50,7 @@ dpo/
 - SQL/timeout/database error：默认不进入 rejected。
 - 无 SQL、重复 response/SQL、触及 `max_new_tokens`：不进入 pair。
 
-默认 `include_execution_error_rejected: false`，因为 SFT validation 已达到 100% SQL 提取/解析率，阶段 3 重点学习能执行但语义错误的困难负例。每题只保留一个 pair，并优先选择 chosen/rejected token 长度差最小的组合，降低长度偏差。
+默认 `include_execution_error_rejected: false`，因为 SFT validation 已达到 100% SQL 提取/解析率，阶段 3 重点学习能执行但语义错误的困难负例。每题只保留一个 pair。选择组合时先在 execution-correct 候选中优先使用与 gold canonical SQL 完全一致的 chosen，再在同一优先级内选择 chosen/rejected token 长度差最小的组合，降低长度偏差。canonical match 只用于正确候选之间的选择，不代替 execution verifier。
 
 输出使用 conversational DPO 格式：
 
@@ -80,7 +80,7 @@ export HF_HUB_CACHE=/root/autodl-tmp/huggingface/hub
 scripts/mine_dpo.sh --validate-only
 ```
 
-默认应报告从 4,809 条中选择 2,000 条，并覆盖全部 69 个数据库。
+默认应报告从 4,809 条中确定性选择 2,000 条，并覆盖全部 69 个数据库。
 
 ## 5. 200 条 pilot
 
@@ -100,11 +100,15 @@ CUDA_VISIBLE_DEVICES=0 scripts/mine_dpo.sh \
 - chosen/rejected token 长度差。
 - gold、candidate 执行异常原因。
 
+已完成的 200-question、`8 prompts × K=4`、temperature 0.7 pilot 产出了 46 个有效 pair，`pair_yield=23%`，A800 80GB 峰值显存约 59GB。按修正后的选择规则只读重选，pair 数仍为 46，其中 canonical-exact chosen 为 25 个。为缩短项目周期，正式任务改为 database-aware 的 2,000 条抽样，并将 temperature 提到 0.9 以增加候选差异；`8 × 4`、top-p 0.95 保持不变。temperature 变化后的 pair yield 需以正式 mining report 为准。
+
 ## 6. 正式 2,000 条 mining
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 scripts/mine_dpo.sh
 ```
+
+采样阶段使用按 question 计数的 `tqdm` 进度条，显示已完成数量、处理速度、已用时间和预计剩余时间（ETA）。断点续跑时，进度条会从已有 question 数量开始。
 
 也可以将 GPU generation 与 CPU/SQLite build 分开：
 
