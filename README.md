@@ -183,6 +183,24 @@ CUDA_VISIBLE_DEVICES=0 scripts/eval_sft.sh \
   --output-dir /root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora/eval/bird_dev
 ```
 
+## Mine execution-guided DPO preferences
+
+The stage-3 guide is in [`src/align_sql/training/dpo/README.md`](src/align_sql/training/dpo/README.md). Validate the deterministic 2,000-prompt selection locally without CUDA or databases:
+
+```bash
+scripts/mine_dpo.sh --validate-only
+```
+
+Run a separate 200-question A800 pilot before the default 2,000-question job:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 scripts/mine_dpo.sh \
+  --limit 200 \
+  --output-dir /root/align-sql/outputs/dpo-mining-pilot
+```
+
+The default `K=4` pipeline samples full reasoning plus SQL from the SFT adapter, executes gold once per question inline, reuses that result for all candidates, and keeps execution-correct versus executable-wrong hard-negative pairs. It does not use the 107 held-out validation questions.
+
 ## Status
 
-Phases 0 and 1 are complete. The stage-2 QLoRA-SFT and independent generation/execution evaluation implementations are ready; the actual A800 training and evaluation runs are pending. Preference mining and DPO are implemented in later phases.
+Phases 0, 1, and 2 are complete. Stage-3 preference-mining code and configuration are ready; the A800 pilot and full mining run are pending. DPO training is implemented in stage 4.

@@ -234,6 +234,24 @@ def _unordered_rows(rows: tuple[tuple[Any, ...], ...]) -> list[str]:
     )
 
 
+def compare_query_results(
+    candidate: QueryResult,
+    gold: QueryResult,
+    gold_sql: str,
+) -> tuple[bool, bool]:
+    """Compare already-executed results without running the gold query again."""
+
+    order_sensitive = _has_top_level_order_by(gold_sql)
+    if gold.status != "ok" or candidate.status != "ok":
+        return False, order_sensitive
+    matched = (
+        candidate.rows == gold.rows
+        if order_sensitive
+        else _unordered_rows(candidate.rows) == _unordered_rows(gold.rows)
+    )
+    return matched, order_sensitive
+
+
 def compare_execution(
     database_path: str | Path,
     candidate_sql: str,
@@ -254,14 +272,7 @@ def compare_execution(
         timeout_seconds=timeout_seconds,
         max_result_rows=max_result_rows,
     )
-    order_sensitive = _has_top_level_order_by(gold_sql)
-    matched = False
-    if gold.status == "ok" and candidate.status == "ok":
-        matched = (
-            candidate.rows == gold.rows
-            if order_sensitive
-            else _unordered_rows(candidate.rows) == _unordered_rows(gold.rows)
-        )
+    matched, order_sensitive = compare_query_results(candidate, gold, gold_sql)
     return {
         "match": matched,
         "order_sensitive": order_sensitive,

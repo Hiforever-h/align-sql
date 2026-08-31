@@ -123,7 +123,7 @@ SFT 是项目主体，DPO 只负责在 SFT checkpoint 上提高正确轨迹的�
 - 3,072 tokens 覆盖 99.9593% 样本；仅 2 条超过 3,072，最长 3,160。
 - 阶段 2 默认采用 `max_seq_length=3072`，显式排除这 2 条超长样本，不进行静默截断。
 
-## 四、阶段 2：QLoRA CoT-SFT（代码已完成，A800 训练待执行）
+## 四、阶段 2：QLoRA CoT-SFT（训练与 Train-val 评测已完成）
 
 ### 目标
 
@@ -143,20 +143,64 @@ SFT 是项目主体，DPO 只负责在 SFT checkpoint 上提高正确轨迹的�
    - gradient checkpointing。
    - 单卡 A800 80GB。
 
-5. 初始训练策略以稳定为主：2 epochs、`1e-4` 学习率、固定随机种子，并保存 adapter、tokenizer、配置和日志。（配置已完成）
+5. 初始训练策略以稳定为主：2 epochs、`1e-4` 学习率、固定随机种子，并保存 adapter、tokenizer、配置和日志。（已完成）
 6. 同时接入 W&B 与 TensorBoard；W&B 默认只上传训练指标，不上传模型 artifact 或梯度直方图。（已完成）
-7. 先用 5 steps 完成 A800 smoke run，再启动完整训练。（待在 A800 执行）
-8. 使用同一评测器分别运行 4-bit Base 与 SFT adapter 的 greedy generation、SQL 提取/解析和可选 SQLite execution evaluation；两者保持相同数据与解码参数。（代码已完成，A800 评测待执行）
+7. 单张 A800 80GB 已完成 602 optimizer steps、2 epochs 的完整训练；下载产物中未单独保留 smoke run 结果。（完整训练已完成）
+8. 使用同一评测器分别运行 4-bit Base 与 SFT adapter 的 greedy generation、SQL 提取/解析和 SQLite execution evaluation；两者保持相同数据与解码参数。（107 条 Train validation 已完成，BIRD Dev 未执行）
+
+### A800 实际训练结果（2026-08-30）
+
+- 硬件：单张 NVIDIA A800 80GB PCIe，manifest 记录可用显存 79.25 GiB；训练正常结束，无 OOM 或 NaN。
+- 数据：4,809 条 train、107 条 validation；2 条超过 3,072 tokens 的训练样本按配置排除。
+- 训练：2 epochs、602 optimizer steps、有效 batch size 16、15,376,960 input tokens。
+- 耗时：7,403 秒，约 2 小时 3 分；吞吐约 1.299 samples/s。
+- 最终指标：train loss 0.4611、validation loss 0.4900、validation mean token accuracy 0.8421。
+- Adapter：161,480,704 个可训练参数；run manifest 在其 4-bit 参数统计口径下报告 trainable percent 为 3.577%；当前下载的 `final_adapter/` 约 329 MB。
+- validation loss 从 step 100 的 0.5101 总体下降至训练结束的 0.4900，没有观察到明显发散。
+
+下载的 `run_manifest.json` 保留了实际训练时的旧输出路径 `/root/autodl-tmp/outputs/sft-qwen2.5-coder-7b-qlora`；当前仓库配置和后续运行统一使用 `/root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora`。历史 manifest 记录实际运行环境，不做追溯改写。
+
+### Base 与 QLoRA-SFT Train-val 对比
+
+两组均使用同一份 107 条 `sft_validation.jsonl`、4-bit base、greedy decoding、seed 42 和 Train SQLite 数据库。
+
+| 指标 | Base | QLoRA-SFT | 变化 |
+| --- | ---: | ---: | ---: |
+| SQL extraction rate | 92.52% | 100.00% | +7.48 pp |
+| SQL parse rate | 92.52% | 100.00% | +7.48 pp |
+| Canonical match accuracy | 2.80% | 21.50% | +18.69 pp |
+| Candidate execution success rate | 82.24% | 95.33% | +13.08 pp |
+| Raw execution accuracy | 42.06%（45/107） | 71.96%（77/107） | +29.91 pp |
+| Mean generated tokens | 226.27 | 357.51 | +131.24 |
+
+配对结果为：43 条两者都正确、34 条由 Base 错误变为 SFT 正确、2 条由 Base 正确退化为 SFT 错误、28 条两者都错误。净增加 32 条 execution-correct prediction，说明本次提升不是少量样本波动。
+
+两条 raw execution failure 不应直接归因于模型：
+
+- question 5766：candidate 与 gold canonical SQL 完全一致，但两者结果都超过 `max_result_rows=100000`，被 verifier 记为失败。
+- question 6410：candidate 和 gold 都因当前 Train 数据库缺少 `employeeterritories` 表而执行失败，无法判定语义正确性。
+
+排除这两条 gold 不可正常验证的样本后，内部诊断 accuracy 为 Base 42.86%（45/105）、SFT 73.33%（77/105）。项目报告仍保留 evaluator 原始的 45/107 与 77/107，同时明确说明这两个异常样本，避免把修正口径冒充官方 BIRD 指标。
+
+### 结果分析与边界
+
+- SFT 已稳定学会输出可提取、可解析的 SQL：107/107 均提取和解析成功；Base 有 8 条无法提取 SQL。
+- SFT 的 77 条 execution match 中，55 条并不满足 canonical exact match，进一步证明本项目必须以执行结果为主，不能用 SQL 字符串相等替代 verifier。
+- 去除 2 条 verifier/数据库异常后，SFT 仍有 28 条模型失败：25 条 SQL 可执行但结果错误，3 条因错误列或缺失 join 执行失败。主要错误集中在 join/table 选择、过滤边界与常量、`DISTINCT`/聚合、输出列及日期运算。
+- 两条真实退化分别是 question 2281（漏掉 `movies` join，引用不存在的 `year`）和 question 4141（遗漏 `DISTINCT` 导致计数错误）。DPO preference mining 应确保这类近似但关键 token 不同的轨迹进入 rejected。
+- SFT 平均生成长度从 226 增至 358 tokens，且样本输出仍以较长自然语言解释为主，没有完全达到“短结构化 query plan”的最初目标。这不影响当前 SFT 验收，但会增加 K-way sampling 与 DPO 成本；阶段 3 先使用 `K=4`，不直接提高到 8。
+- 本次 validation 来自 BIRD Train 的高置信 synthetic-CoT 数据，是 question-disjoint 的 in-domain held-out split，不是 BIRD Dev。当前结果可以证明 SFT 对该训练分布有效，但不能据此宣称 BIRD benchmark 泛化提升；因 Dev 规模较大，本轮未执行 Dev 评测。
 
 ### 验收标准
 
-- 单张 A800 80GB 能完成训练，无 OOM。
-- train/eval loss 正常下降且无 NaN。
-- 保存的 adapter 能重新加载并完成 greedy inference。
-- 输出可以被 SQL 提取器稳定解析。
-- 抽样检查中 reasoning、SQL 和输入 schema 保持一致。
+- [x] 单张 A800 80GB 能完成训练，无 OOM。
+- [x] train/eval loss 正常下降且无 NaN。
+- [x] 保存的 adapter 能重新加载并完成 greedy inference。
+- [x] SFT validation 的 SQL 提取率和解析率达到 100%。
+- [x] 使用相同 verifier 时，SFT raw execution accuracy 明显高于 Base。
+- [ ] BIRD Dev 尚未评测，不把 Train validation 结果表述为最终 benchmark 分数。
 
-## 五、阶段 3：执行引导的 DPO 偏好数据（待执行）
+## 五、阶段 3：执行引导的 DPO 偏好数据（代码已完成，A800 mining 待执行）
 
 ### 目标
 
@@ -170,12 +214,14 @@ reasoning + correct SQL  >  reasoning + wrong SQL
 
 ### 实现内容
 
-1. 使用 SFT adapter 对每个 prompt 进行 K-way sampling，初始 `K=4`；候选不足时再考虑提高到 8。
-2. 从每条输出中提取最终 SQL，并记录无法解析的候选。
-3. 在对应 BIRD SQLite 数据库上执行 candidate SQL 和 gold SQL。
-4. 对结果进行稳定规范化，处理列值、NULL、顺序和执行异常。
-5. 从同一道题中选择 execution-correct trajectory 作为 `chosen`，execution-wrong trajectory 作为 `rejected`。
-6. 输出标准 DPO JSONL，并记录采样参数、模型 checkpoint、执行状态和构造统计。
+1. 从实际参与 SFT 的 4,809 条 train prompts 中按数据库覆盖进行确定性抽样；默认选择 2,000 条，107 条 validation 不参与 mining。（代码已完成）
+2. 使用 SFT adapter 对每个 prompt 进行 `K=4` sampling：temperature 0.7、top-p 0.95、max new tokens 768；候选生成支持独立阶段与断点续跑。（代码已完成）
+3. 从每条完整输出中提取最终 SQL，并记录 parse、截断、重复和 token 长度。（代码已完成）
+4. 不运行独立 gold 预验证 pass；验证某道题时只执行一次 gold，并将结果复用于该题全部 candidate。gold 状态非 `ok` 时跳过该题 candidate execution 并报告原因。（代码已完成）
+5. 优先从同一道题中选择 execution-correct trajectory 作为 `chosen`、可执行但结果错误的 hard negative 作为 `rejected`；默认不使用无 SQL 或 SQL error 这类简单负例。（代码已完成）
+6. 每题最多保留一个长度尽量接近的 pair，去除重复/截断候选，并按数据库感知的 95/5 比例输出 DPO train/validation JSONL。（代码已完成）
+7. 保存 raw/verified candidates、pair 数据、mining report 和包含数据/选择/adapter 指纹的 run manifest。（代码已完成）
+8. 先运行 200 prompts pilot，根据实际 pair yield 和吞吐决定是否维持默认 2,000 条或扩大到全部 4,809 条。（待 A800 执行）
 
 ### BIRD 33.4GB 数据库的使用边界
 
@@ -238,6 +284,6 @@ reasoning + correct SQL  >  reasoning + wrong SQL
 
 - [x] 阶段 0：环境与仓库初始化。
 - [x] 阶段 1：构建 CoT-SFT 数据。
-- [ ] 阶段 2：QLoRA CoT-SFT（代码与配置已完成，A800 训练待执行）。
-- [ ] 阶段 3：执行引导的 DPO 偏好数据。
+- [x] 阶段 2：QLoRA CoT-SFT（单卡 A800 训练及 107 条 Train validation Base/SFT 对比已完成；BIRD Dev 未评测）。
+- [ ] 阶段 3：执行引导的 DPO 偏好数据（代码、配置和本地校验已完成；A800 pilot/full mining 待执行）。
 - [ ] 阶段 4：QLoRA-DPO 与最小验收。

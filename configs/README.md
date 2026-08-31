@@ -6,4 +6,6 @@
 
 `eval_base.yaml` and `eval_sft.yaml` define the matched Base/SFT comparison. They use the same base model, validation data, greedy decoding, seed, token limits, and optional SQLite execution settings. The Base config sets `mode: base` with `adapter_path: null`; the SFT config sets `mode: adapter` with the final adapter path. Evaluation artifacts stay under `/root/align-sql/outputs/`.
 
-Sampling, DPO, and evaluation configurations will be added in their corresponding implementation phases. Machine-specific paths and secrets must stay out of these files.
+`dpo_mining.yaml` controls the stage-3 database-aware prompt subset, K-way SFT sampling, inline execution verification, hard-negative pairing, and resumable artifacts. It does not run a separate gold SQL prevalidation pass.
+
+DPO training configuration will be added in stage 4. Machine-specific secrets must stay out of these files.
