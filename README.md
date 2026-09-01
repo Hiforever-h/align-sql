@@ -1,6 +1,6 @@
 # AlignSQL
 
-AlignSQL 是一个面向 Text-to-SQL 的轻量后训练项目，完整跑通了以下单卡主线：
+AlignSQL 是一个面向 Text-to-SQL 的后训练项目，完整跑通了以下主线：
 
 ```text
 Qwen2.5-Coder-7B-Instruct
@@ -16,7 +16,7 @@ QLoRA-DPO
 matched execution evaluation
 ```
 
-项目重点不是搭建复杂 Agent，而是验证一条清晰、可复现的 `QLoRA → SFT → execution-guided preference mining → DPO` 工程链路。全部 7B 训练与生成任务均在一张 NVIDIA A800 80GB 上完成。
+全部 7B 训练与生成任务均在一张 NVIDIA A800 80GB 上完成。
 
 ## 最终实验结果
 
