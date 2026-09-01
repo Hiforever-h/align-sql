@@ -6,5 +6,4 @@
 - `eval_base.sh`: run the 4-bit Base baseline without loading a PEFT adapter.
 - `eval_sft.sh`: run gold self-check, greedy SFT generation, and optional SQLite execution evaluation.
 - `mine_dpo.sh`: generate resumable K-way SFT candidates, verify them on Train SQLite databases, and build hard-negative DPO pairs.
-
-DPO training wrappers will be added in stage 4.
+- `train_dpo.sh`: validate or run the stage-4 single-GPU QLoRA-DPO refinement from the final SFT adapter.

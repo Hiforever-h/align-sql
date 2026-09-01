@@ -8,4 +8,4 @@
 
 `dpo_mining.yaml` controls the stage-3 database-aware prompt subset, K-way SFT sampling, inline execution verification, hard-negative pairing, and resumable artifacts. It does not run a separate gold SQL prevalidation pass.
 
-DPO training configuration will be added in stage 4. Machine-specific secrets must stay out of these files.
+`dpo_qlora.yaml` controls the stage-4 single-A800 DPO refinement. It starts from the trained SFT adapter, keeps a frozen reference copy inside the same PEFT model, uses one conservative epoch at `5e-7`, and rejects rather than truncates pairs over 3,072 tokens. Machine-specific secrets must stay out of these files.

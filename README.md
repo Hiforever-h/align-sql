@@ -207,6 +207,28 @@ CUDA_VISIBLE_DEVICES=0 scripts/mine_dpo.sh
 
 The default `K=4` pipeline samples full reasoning plus SQL from the SFT adapter, executes gold once per question inline, reuses that result for all candidates, and keeps execution-correct versus executable-wrong hard-negative pairs. It does not use the 107 held-out validation questions.
 
+The completed full run produced 551 pairs from 2,000 questions (`27.55%` yield): 523 for DPO training and 28 for DPO loss validation. All full chosen/rejected conversations fit within 3,072 tokens.
+
+## Run QLoRA-DPO on one A800
+
+The stage-4 training and evaluation guide is in [`src/align_sql/training/dpo/README.md`](src/align_sql/training/dpo/README.md). Validate the adapter, mining manifest, preference schema, leakage, and exact Qwen token lengths without loading the 7B model:
+
+```bash
+scripts/train_dpo.sh --validate-only
+```
+
+Run a separate five-step smoke test, then the default one-epoch job:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 scripts/train_dpo.sh \
+  --max-steps 5 \
+  --output-dir /root/align-sql/outputs/dpo-smoke
+
+CUDA_VISIBLE_DEVICES=0 scripts/train_dpo.sh
+```
+
+The policy starts from the final SFT adapter. TRL keeps a frozen copy of that adapter as the reference inside the same 4-bit base model, so a second 7B reference model is not allocated. The default 523-pair run uses effective batch size 8, `beta=0.1`, learning rate `5e-7`, and 66 optimizer steps. W&B and TensorBoard record DPO loss, chosen/rejected rewards, margins, and accuracy.
+
 ## Status
 
-Phases 0, 1, and 2 are complete. Stage-3 preference-mining code, configuration, and A800 pilot are complete; the expedited 2,000-question mining run is pending. DPO training is implemented in stage 4.
+Phases 0, 1, 2, and the stage-3 preference mining run are complete. Stage-4 DPO training code and local data validation are complete; the A800 smoke/formal DPO run and final execution evaluation are pending.

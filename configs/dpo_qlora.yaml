@@ -1,0 +1,61 @@
+model:
+  base_model_name_or_path: Qwen/Qwen2.5-Coder-7B-Instruct
+  sft_adapter_path: /root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora/final_adapter
+  trust_remote_code: false
+  attn_implementation: sdpa
+
+quantization:
+  load_in_4bit: true
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: bfloat16
+
+data:
+  train_file: outputs/dpo-mining-k4/dpo_train.jsonl
+  validation_file: outputs/dpo-mining-k4/dpo_validation.jsonl
+  mining_manifest_file: outputs/dpo-mining-k4/run_manifest.json
+  max_length: 3072
+  overlength_policy: error
+  expected_train_pairs: 523
+  expected_validation_pairs: 28
+
+dpo:
+  loss_type: sigmoid
+  beta: 0.1
+  precompute_ref_log_probs: false
+
+training:
+  output_dir: /root/align-sql/outputs/dpo-qwen2.5-coder-7b-qlora
+  run_name: qwen2.5-coder-7b-qlora-cot-dpo
+  num_train_epochs: 1.0
+  max_steps: -1
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 8
+  learning_rate: 0.0000005
+  warmup_steps: 5
+  lr_scheduler_type: cosine
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  optim: paged_adamw_8bit
+  bf16: true
+  tf32: true
+  gradient_checkpointing: true
+  gradient_checkpointing_use_reentrant: false
+  pad_to_multiple_of: 8
+  logging_steps: 5
+  eval_steps: 10
+  save_steps: 20
+  save_total_limit: 2
+  dataset_num_proc: 4
+  dataloader_num_workers: 4
+  seed: 42
+  report_to:
+    - tensorboard
+    - wandb
+
+monitoring:
+  wandb_project: align-sql
+  wandb_mode: online
+  wandb_log_model: false
+  wandb_watch: false

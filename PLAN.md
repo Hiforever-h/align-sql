@@ -200,7 +200,7 @@ SFT 是项目主体，DPO 只负责在 SFT checkpoint 上提高正确轨迹的�
 - [x] 使用相同 verifier 时，SFT raw execution accuracy 明显高于 Base。
 - [ ] BIRD Dev 尚未评测，不把 Train validation 结果表述为最终 benchmark 分数。
 
-## 五、阶段 3：执行引导的 DPO 偏好数据（pilot 已完成，full mining 待执行）
+## 五、阶段 3：执行引导的 DPO 偏好数据（已完成）
 
 ### 目标
 
@@ -221,7 +221,8 @@ reasoning + correct SQL  >  reasoning + wrong SQL
 5. 优先从同一道题中选择 execution-correct trajectory 作为 `chosen`、可执行但结果错误的 hard negative 作为 `rejected`；默认不使用无 SQL 或 SQL error 这类简单负例。（代码已完成）
 6. 每题最多保留一个 pair；execution-correct chosen 中优先选择 canonical SQL 与 gold 完全一致的候选，再在同一优先级内最小化 chosen/rejected token 长度差。去除重复/截断候选，并按数据库感知的 95/5 比例输出 DPO train/validation JSONL。（代码已完成）
 7. 保存 raw/verified candidates、pair 数据、mining report 和包含数据/选择/adapter 指纹的 run manifest。（代码已完成）
-8. 已完成 temperature 0.7 的 `200 prompts × K=4` pilot：使用 prompt batch size 8，产出 46 个有效 pair，`pair_yield=23%`，A800 80GB 峰值显存约 59GB。按修正后的策略只读重选后 pair 数不变，canonical-exact chosen 从 16 增至 25，平均 pair token 长度差约为 40.2。为控制时间，正式任务使用 2,000 条、temperature 0.9 和 `8 × 4` 配置；按 pilot 吞吐预计 generation + build 约 4.5 小时，实际时间受输出长度影响。（pilot 已完成）
+8. 已完成 temperature 0.7 的 `200 prompts × K=4` pilot：使用 prompt batch size 8，产出 46 个有效 pair，`pair_yield=23%`，A800 80GB 峰值显存约 59GB。按修正后的策略只读重选后 pair 数不变，canonical-exact chosen 从 16 增至 25，平均 pair token 长度差约为 40.2。（已完成）
+9. 已完成正式 temperature 0.9 的 `2,000 prompts × K=4` mining：8,000 个候选完整，产出 551 pairs（yield 27.55%），拆分为 523 train / 28 validation，覆盖 66 个数据库；generation 约 4 小时 17 分钟，verification 约 26 分钟。（已完成）
 
 ### BIRD 33.4GB 数据库的使用边界
 
@@ -239,7 +240,7 @@ reasoning + correct SQL  >  reasoning + wrong SQL
 - 不用 candidate SQL 与 gold SQL 的字符串相等代替执行验证。
 - 不把同一条响应或规范化后相同的 SQL 构造成偏好对。
 
-## 六、阶段 4：QLoRA-DPO 与最小验收（待执行）
+## 六、阶段 4：QLoRA-DPO 与最小验收（代码已完成，A800 待执行）
 
 ### 目标
 
@@ -247,12 +248,14 @@ reasoning + correct SQL  >  reasoning + wrong SQL
 
 ### 实现内容
 
-1. 从 SFT checkpoint 初始化 policy，使用与 SFT 相同的 4-bit base model 和 LoRA 方案。
-2. 固定 reference 行为，避免额外复制不必要的 7B 权重。
-3. 使用小学习率和保守 `beta`，训练约 1 epoch，避免 DPO 覆盖 SFT 已学到的能力。
-4. 保存独立 DPO adapter，不覆盖 SFT adapter。
-5. 用固定 prompt 子集和统一 greedy decoding 比较 base、SFT、DPO 三个 checkpoint。
-6. 至少记录：SQL 提取成功率、执行成功率、execution accuracy、生成长度和典型错误。
+1. 以 4-bit NF4 加载 base，prepare k-bit training 后用 `is_trainable=True` 加载现有 SFT adapter；不创建随机 LoRA、不 merge。（代码已完成）
+2. 使用 TRL/PEFT 在同一量化 base 中复制冻结的初始 SFT `ref` adapter，避免复制第二份 7B 权重，并断言 reference trainable parameters 为 0。（代码已完成）
+3. 对 523/28 preference 数据执行 schema、重复、train/validation 泄漏、mining manifest、输入哈希和精确 tokenizer 长度审计；最长 pair 为 3,034 tokens，3,072 上限不截断。（代码已完成）
+4. 使用 sigmoid DPO、`beta=0.1`、学习率 `5e-7`、micro-batch 1、gradient accumulation 8 和 1 epoch；共约 66 optimizer steps。（配置已完成）
+5. 每 5 steps 记录日志、每 10 steps evaluation、每 20 steps checkpoint，保留最近 2 个；W&B 与 TensorBoard 同时监控。（代码已完成）
+6. 最终只保存训练后的 default policy adapter，不覆盖 SFT adapter；保存 run manifest、数据与 adapter 指纹、train/eval metrics。（代码已完成）
+7. 先运行 5-step A800 smoke，再运行正式 1 epoch。（待 A800 执行）
+8. 使用固定的 107 条 SFT validation 和相同 greedy execution verifier 对比 SFT/DPO；SFT baseline 为 77/107（71.96%）。（待 A800 执行）
 
 ### 验收标准
 
@@ -285,5 +288,5 @@ reasoning + correct SQL  >  reasoning + wrong SQL
 - [x] 阶段 0：环境与仓库初始化。
 - [x] 阶段 1：构建 CoT-SFT 数据。
 - [x] 阶段 2：QLoRA CoT-SFT（单卡 A800 训练及 107 条 Train validation Base/SFT 对比已完成；BIRD Dev 未评测）。
-- [ ] 阶段 3：执行引导的 DPO 偏好数据（代码、配置、本地校验和 A800 pilot 已完成；2,000 条正式 mining 待执行）。
-- [ ] 阶段 4：QLoRA-DPO 与最小验收。
+- [x] 阶段 3：执行引导的 DPO 偏好数据（2,000 条正式 mining 已完成，得到 551 pairs）。
+- [ ] 阶段 4：QLoRA-DPO 与最小验收（代码、配置和本地数据校验已完成；A800 smoke/formal training 与 execution evaluation 待执行）。
