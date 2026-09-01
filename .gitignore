@@ -2,7 +2,7 @@
 .env
 .env.*
 !.env.example
-
+PLAN.md
 __pycache__/
 *.py[cod]
 *.so

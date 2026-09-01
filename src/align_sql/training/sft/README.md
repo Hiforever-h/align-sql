@@ -1,261 +1,251 @@
-# AlignSQL QLoRA CoT-SFT
+# QLoRA SFT
 
-本目录包含阶段 2 的单卡 QLoRA-SFT 实现：
+本目录实现 AlignSQL 的第一阶段：在 `Qwen/Qwen2.5-Coder-7B-Instruct` 上进行 QLoRA 监督微调。SFT 是本项目的主体训练阶段，负责让模型稳定输出结构化分析和可执行 SQL；后续 DPO 只做小幅偏好校准。
+
+## 已完成结果
+
+本次正式训练使用 4,809 条训练样本、训练 2 个 epoch，共完成 602 个 optimizer step。
+
+| 指标 | 结果 |
+| --- | ---: |
+| 训练时长 | 7,403 秒（约 2 小时 03 分） |
+| Train loss | 0.4611 |
+| Trainer eval loss | 0.4900 |
+| Eval mean token accuracy | 0.8421 |
+| 训练输入 token 数 | 15,376,960 |
+| 可训练参数 | 161,480,704 |
+| Final adapter 大小 | 约 319 MB |
+
+Trainer 内部的 eval loss 只衡量 teacher-forcing 下的 token 预测，最终 Text-to-SQL 能力采用独立生成和数据库执行评测：
+
+| 模型 | SQL 提取率 | SQL 解析率 | Candidate success | Canonical match | Execution accuracy |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Base 7B | 92.52% | 92.52% | 82.24% | 2.80% | 42.06%（45/107） |
+| QLoRA-SFT | **100.00%** | **100.00%** | **95.33%** | **21.50%** | **68.22%（73/107）** |
+
+SFT 相比 Base 的 execution accuracy 提高了 **26.16 个百分点**，是整条训练主线中最主要的收益来源。
+
+评测集是从本项目 SFT 数据中固定划分出的 107 条 held-out validation，使用对应 BIRD 数据库做执行验证；它不是 BIRD 官方 Dev leaderboard 结果。
+
+结果文件：
+
+- `outputs/sft-qwen2.5-coder-7b-qlora/train_results.json`
+- `outputs/sft-qwen2.5-coder-7b-qlora/eval/sft_validation_execution/metrics.json`
+- `outputs/base-qwen2.5-coder-7b/eval/sft_validation_execution/metrics.json`
+
+## 目录说明
 
 ```text
-sft/
-├── config.py       # YAML 配置读取、类型转换和参数校验
-├── data.py         # JSONL 校验、长度审计和 prompt/completion 转换
-├── train.py        # 模型加载、QLoRA、Trainer、W&B 和 checkpoint 入口
-└── README.md
+src/align_sql/training/sft/
+├── README.md
+├── config.py        # SFT 配置解析与约束
+├── data.py          # Chat template、长度审计与数据集准备
+├── train.py         # QLoRA-SFT 训练入口
+└── __init__.py
 ```
 
-训练目标是让 `Qwen/Qwen2.5-Coder-7B-Instruct` 根据 BIRD question、schema 和 evidence 生成完整的 reasoning + SQL。数据会被转换成 TRL conversational prompt/completion 格式，并通过 `completion_only_loss=true` 只对 assistant completion 计算 loss。
+训练、评测配置和快捷脚本位于：
 
-## 1. 默认训练配置
+```text
+configs/sft_qlora.yaml
+configs/eval_base.yaml
+configs/eval_sft.yaml
+scripts/train_sft.sh
+scripts/eval_base.sh
+scripts/eval_sft.sh
+```
 
-完整配置位于仓库根目录的 `configs/sft_qlora.yaml`。
+## 正式训练配置
 
-### 模型与量化
-
-| 参数 | 默认值 |
+| 项目 | 配置 |
 | --- | --- |
 | Base model | `Qwen/Qwen2.5-Coder-7B-Instruct` |
-| Attention | PyTorch SDPA |
-| Quantization | 4-bit NF4 |
-| Double quantization | 开启 |
-| Compute dtype | bf16 |
-| LoRA rank | 64 |
-| LoRA alpha | 128 |
+| Tokenizer | 与 Base model 同目录加载的 Qwen2.5 tokenizer |
+| Quantization | bitsandbytes NF4 4-bit，double quant，BF16 compute |
+| LoRA rank / alpha | 64 / 128 |
 | LoRA dropout | 0.05 |
-| LoRA target | `all-linear` |
-
-### 数据与训练
-
-| 参数 | 默认值 |
-| --- | --- |
-| Train source | `data/processed/sft_train.jsonl` |
-| Validation source | `data/processed/sft_validation.jsonl` |
-| Max length | 3,072 tokens |
-| Overlength policy | 显式丢弃，不静默截断 |
-| Train examples | 4,809（原 4,811，丢弃 2 条超长样本） |
-| Validation examples | 107 |
+| Target modules | `all-linear` |
+| Max sequence length | 3072 |
 | Epochs | 2 |
-| Micro-batch | 2 |
+| Micro batch size | 2 |
 | Gradient accumulation | 8 |
 | Effective batch size | 16 |
 | Learning rate | `1e-4` |
-| Scheduler | cosine，20 warmup steps |
-| Optimizer | paged AdamW 8-bit |
-| Gradient checkpointing | 开启，non-reentrant |
-| Packing | 关闭 |
-| Planned optimizer steps | 约 602 |
+| Scheduler | cosine |
+| Warmup | 20 steps |
+| Gradient checkpointing | enabled |
+| Optimizer | `paged_adamw_8bit` |
+| Precision | BF16 |
+| Loss | completion-only |
+| Checkpoint | 每 100 steps，最多保留 2 个 |
+| Logging | Weights & Biases + TensorBoard |
 
-### 日志与 checkpoint
+模型输入采用 Qwen chat template。训练样本的 assistant 内容保留“结构化分析 + SQL”，而不是只训练 SQL 字符串。评测脚本会从完整 assistant 输出中提取最后一个 SQL 代码块或 SQL 语句，因此训练格式与执行评测并不冲突。
 
-| 参数 | 默认值 |
-| --- | --- |
-| Train logging | 每 10 steps |
-| Evaluation | 每 100 steps |
-| Checkpoint | 每 100 steps |
-| Retained checkpoints | 最近 2 个 |
-| Monitoring | W&B + TensorBoard |
-| W&B project | `align-sql` |
-| Model artifact upload | 关闭 |
-| Gradient histogram watch | 关闭 |
+## 数据
 
-每个可恢复 checkpoint 预计约 620–750MiB，最终 `final_adapter` 预计约 310–330MiB。checkpoint 只包含 LoRA adapter 与训练状态，不会复制完整 7B 基座权重。
+正式训练与验证文件：
 
-## 2. 启动前环境配置
+```text
+data/processed/sft_train.jsonl       # 4,811 条源数据；训练时丢弃 2 条超长样本
+data/processed/sft_validation.jsonl  # 107 条
+```
 
-以下命令均从仓库根目录执行。推荐环境：Linux、Python 3.11、单张 A800 80GB，以及与宿主机驱动匹配的 CUDA-enabled PyTorch。
+每条样本使用消息格式：
+
+```json
+{
+  "messages": [
+    {"role": "system", "content": "..."},
+    {"role": "user", "content": "question + schema"},
+    {"role": "assistant", "content": "analysis + SQL"}
+  ]
+}
+```
+
+在 A800 上启动前先运行 validate-only，确认 tokenizer、样本长度和配置；它不加载 7B 权重，也不需要 CUDA：
+
+```bash
+bash scripts/train_sft.sh --validate-only
+```
+
+## 环境准备
+
+项目默认 Conda 环境为 `align-sql`，Python 3.11。A800 机器上的推荐环境变量：
 
 ```bash
 conda activate align-sql
-python -m pip install -r requirements-a800.txt
-python -m pip install --editable .
-python -m pip check
-```
+cd /root/align-sql
 
-`requirements-a800.txt` 不要求固定某个 CUDA wheel，只要求 PyTorch 版本在支持范围内。优先保留 AutoDL 镜像中已经能正常识别 A800 的 PyTorch，避免盲目替换 CUDA 构建。
-
-确认 GPU、CUDA 和 bf16：
-
-```bash
-python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.get_device_name(0), torch.cuda.is_bf16_supported())"
-```
-
-期望最后一项为 `True`。
-
-## 3. Hugging Face 缓存与模型下载
-
-将缓存放到 AutoDL 数据盘。下载和训练必须使用相同的环境变量：
-
-```bash
+export PYTHONPATH=/root/align-sql/src
 export HF_HOME=/root/autodl-tmp/huggingface
 export HF_HUB_CACHE=/root/autodl-tmp/huggingface/hub
-
-mkdir -p /root/autodl-tmp/huggingface/hub
-scripts/download_model.sh Qwen/Qwen2.5-Coder-7B-Instruct
+export TOKENIZERS_PARALLELISM=false
 ```
 
-训练仍然使用模型 ID；Transformers 会从上述 cache 读取已经下载的 snapshot。
+如需提前下载模型：
 
-## 4. W&B 配置
+```bash
+bash scripts/download_model.sh Qwen/Qwen2.5-Coder-7B-Instruct
+```
 
-在线监控前登录：
+配置文件中的 `model_name_or_path` 可以使用 Hugging Face 模型名，也可以改为上述本地目录。
+
+## Weights & Biases
+
+训练默认启用 W&B。首次在服务器上使用时执行：
 
 ```bash
 wandb login
-```
-
-默认 project 是 `align-sql`。可以通过环境变量覆盖账号和项目，不要把 API key 写入 YAML 或 Git：
-
-```bash
 export WANDB_PROJECT=align-sql
-export WANDB_ENTITY=your-user-or-team
+export WANDB_RUN_NAME=sft-qwen2.5-coder-7b-qlora
 ```
 
-网络不稳定时使用离线模式：
+如需离线记录：
 
 ```bash
 export WANDB_MODE=offline
 ```
 
-离线 run 会保存在训练输出目录的 `wandb/` 下，可以在网络恢复后使用 `wandb sync` 上传。TensorBoard 日志始终保留，可作为离线备份。
-
-## 5. 数据准备与预检
-
-正式启动前必须存在：
-
-```text
-data/processed/sft_train.jsonl
-data/processed/sft_validation.jsonl
-```
-
-这两个文件被 Git 忽略。如果 A800 上只有 Git clone，需要单独复制 processed 数据，或者先准备 raw data 再运行：
+只有明确不需要记录时才设置：
 
 ```bash
-scripts/prepare_sft.sh
+export WANDB_DISABLED=true
 ```
 
-不加载 7B 权重、不要求 CUDA的数据预检命令：
+## 启动训练
+
+推荐直接运行：
 
 ```bash
-scripts/train_sft.sh --validate-only
+bash scripts/train_sft.sh
 ```
 
-预期关键结果：
-
-```text
-train kept_count: 4809
-train dropped_count: 2
-validation kept_count: 107
-planned_optimizer_steps: 602
-```
-
-如果 tokenizer 版本导致长度与阶段 1 记录不一致，预检会直接失败，不会静默改变训练数据。
-
-## 6. A800 smoke run
-
-首次运行建议先执行 5 optimizer steps，并使用独立输出目录：
+等价的 Python 命令：
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 scripts/train_sft.sh \
-  --max-steps 5 \
-  --output-dir /root/align-sql/outputs/sft-smoke
-```
-
-确认以下项目后再正式训练：
-
-- 没有 CUDA OOM。
-- loss 和 grad norm 为有限数值，无 NaN/Inf。
-- W&B 中能够看到训练 run。
-- `/root/align-sql/outputs/sft-smoke/final_adapter/` 可以生成。
-
-## 7. 正式训练
-
-```bash
-CUDA_VISIBLE_DEVICES=0 scripts/train_sft.sh
-```
-
-等价的直接模块命令：
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python -m align_sql.training.sft.train \
+python -m align_sql.training.sft.train \
   --config configs/sft_qlora.yaml
 ```
 
-默认输出：
+正式输出目录统一为：
 
 ```text
-/root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora/
-├── checkpoint-500/       # 结束时通常保留的两个最近 checkpoint
-├── checkpoint-600/
-├── final_adapter/        # 最终 LoRA adapter + tokenizer
-├── run_manifest.json     # 配置、依赖、硬件、数据审计和最终指标
+/root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora
+```
+
+主要产物：
+
+```text
+outputs/sft-qwen2.5-coder-7b-qlora/
+├── checkpoint-*/
+├── final_adapter/
+├── run_manifest.json
 ├── train_results.json
-├── eval_results.json
-├── trainer_state.json
-└── wandb/
+└── eval/
 ```
 
-训练期间会生成 checkpoint-100、200、300、400、500 和 600，但 `save_total_limit=2` 会自动清理较旧 checkpoint。`final_adapter/` 不参与这个轮转。
+## Checkpoint 与恢复
 
-## 8. 断点恢复
+正式配置每 100 steps 保存一次 checkpoint，并通过 `save_total_limit: 2` 最多保留两个。Checkpoint 还包含 optimizer、scheduler 和 trainer state，因此明显大于只含最终权重与 tokenizer 的 `final_adapter`。下载回本地的产物没有保留 SFT checkpoints，无法从现有文件给出其精确大小；本次 `final_adapter` 实测约 319 MB。
 
-必须传入确切 checkpoint 路径：
+从 checkpoint 恢复：
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 scripts/train_sft.sh \
-  --resume-from-checkpoint /root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora/checkpoint-500
+python -m align_sql.training.sft.train \
+  --config configs/sft_qlora.yaml \
+  --resume-from-checkpoint \
+  /root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora/checkpoint-500
 ```
 
-如果希望 W&B 继续到原 run，可在恢复前设置原来的 W&B run ID：
+恢复前应先检查目标目录中实际存在的 checkpoint，不要凭空填写 step。
+
+## 独立执行评测
+
+### 评测 Base 模型
 
 ```bash
-export WANDB_RUN_ID=your-existing-run-id
-export WANDB_RESUME=must
+bash scripts/eval_base.sh \
+  --db-root /root/autodl-tmp/bird/train/train_databases \
+  --output-dir /root/align-sql/outputs/base-qwen2.5-coder-7b/eval/sft_validation_execution
 ```
 
-不要删除 checkpoint 中的 optimizer、scheduler、RNG 或 trainer state；只保留 adapter 无法做到严格的训练状态恢复。
+Base 模型不加载 adapter；快捷脚本已经处理了空 adapter 的情况，不需要手工传空字符串。
 
-## 9. 常用覆盖参数
-
-不修改 YAML 也可以执行 smoke run、改变输出目录或使用本地模型 snapshot：
+### 评测 SFT adapter
 
 ```bash
-scripts/train_sft.sh --max-steps 5
-scripts/train_sft.sh --output-dir /root/align-sql/outputs/another-sft-run
-scripts/train_sft.sh --model-name-or-path /path/to/local/model-snapshot
+bash scripts/eval_sft.sh \
+  --db-root /root/autodl-tmp/bird/train/train_databases \
+  --output-dir /root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora/eval/sft_validation_execution
 ```
 
-其他超参数统一修改 `configs/sft_qlora.yaml`，以保证 run manifest 能完整记录实际配置。
-
-## 10. Base/SFT 生成评测
-
-训练中的 validation 只计算 loss。独立的 SQL 生成与执行评测说明位于 `src/align_sql/evaluation/sft/README.md`。Base 使用独立入口，不要把 SFT adapter 参数传空：
+等价命令：
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 scripts/eval_base.sh \
-  --limit 5 \
-  --output-dir /root/align-sql/outputs/base-qwen2.5-coder-7b/eval/smoke
+python -m align_sql.evaluation.sft.evaluate \
+  --config configs/eval_sft.yaml \
+  --adapter /root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora/final_adapter \
+  --db-root /root/autodl-tmp/bird/train/train_databases \
+  --output-dir /root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora/eval/sft_validation_execution
 ```
 
-然后运行五条 SFT 实际模型输出：
+评测流程为：
 
-```bash
-CUDA_VISIBLE_DEVICES=0 scripts/eval_sft.sh \
-  --limit 5 \
-  --output-dir /root/align-sql/outputs/sft-qwen2.5-coder-7b-qlora/eval/smoke
+```text
+question + schema
+        ↓
+greedy generation
+        ↓
+SQL extraction and parsing
+        ↓
+execute candidate and gold SQL
+        ↓
+normalize result sets and compare
 ```
 
-最后分别运行完整 107 条 SFT validation：
+主指标是 execution accuracy。`canonical_match` 只比较规范化后的 SQL 文本，不能替代执行评测，因为语义等价 SQL 可能有不同写法。
 
-```bash
-CUDA_VISIBLE_DEVICES=0 scripts/eval_base.sh
-```
+## 与 DPO 阶段的衔接
 
-```bash
-CUDA_VISIBLE_DEVICES=0 scripts/eval_sft.sh
-```
+DPO 阶段以本目录产出的 `final_adapter` 同时初始化 policy 和冻结的 reference model，并从 SFT policy 采样候选 SQL。完整 DPO 流程见 [DPO README](../dpo/README.md)。
